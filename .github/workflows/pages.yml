@@ -1,0 +1,44 @@
+name: 发布网页
+# 2026-11-09 Mili 定：网页发布从 GitHub 老式「pages build and deployment」（每次 3 个任务，约 3 分钟计费）
+# 改成这个一步发完（每次 1 个任务，约 1 分钟）。仓库里的文件原样发布，不做任何加工。
+# 要在 Settings → Pages → Build and deployment → Source 选「GitHub Actions」才接手；
+# 还是老办法（Deploy from a branch）的时候，这里只检查一下就结束，网页照老办法发布，不会重复发。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: 看网页设置是不是已经切到「GitHub Actions」
+        id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          t=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type) || { echo "::error::读不到网页设置（Pages）"; exit 1; }
+          echo "build_type=$t" >> "$GITHUB_OUTPUT"
+          if [ "$t" != workflow ]; then echo "::notice::网页还是老办法发布（$t），这次跳过；Settings → Pages → Source 改成 GitHub Actions 后由这里发布"; fi
+      - uses: actions/checkout@v4
+        if: steps.mode.outputs.build_type == 'workflow'
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.mode.outputs.build_type == 'workflow'
+        with:
+          path: .
+      - id: deploy
+        uses: actions/deploy-pages@v4
+        if: steps.mode.outputs.build_type == 'workflow'
