@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -36,9 +37,31 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.mode.outputs.build_type == 'workflow'
       - uses: actions/upload-pages-artifact@v3
+        id: bundle
         if: steps.mode.outputs.build_type == 'workflow'
         with:
           path: .
+      - name: 等物流看板构建包可读
+        if: steps.mode.outputs.build_type == 'workflow' && startsWith(github.event.head_commit.message, 'logistics dashboard ')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.bundle.outputs.artifact_id }}
+        run: |
+          set -e
+          [ -n "$ARTIFACT_ID" ] || { echo '::error::没有收到上传的构建包编号'; exit 1; }
+          for attempt in {1..12}; do
+            ready=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+              -f name=github-pages --jq '.artifacts[] | select(.expired == false and .size_in_bytes > 0) | .id') || ready=
+            if [ "$ready" = "$ARTIFACT_ID" ]; then
+              # The deploy action reads the artifact index through the runner service too.
+              sleep 5
+              echo "构建包 $ARTIFACT_ID 已可读"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo '::error::构建包上传后等待超时'
+          exit 1
       - id: deploy
         uses: actions/deploy-pages@v4
         if: steps.mode.outputs.build_type == 'workflow'
